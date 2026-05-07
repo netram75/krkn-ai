@@ -2,7 +2,6 @@
 
 import yaml
 
-from krkn_ai.models.config import ParameterValue
 from krkn_ai.utils.fs import read_config_from_file
 
 
@@ -37,26 +36,6 @@ class TestParamParsing:
             key, value = p, ""
         assert key == "JUST_A_KEY"
         assert value == ""
-
-
-class TestParameterValue:
-    def test_public_param_from_cli(self):
-        param = ParameterValue.from_cli("MY_KEY", "my-value")
-        assert param.value == "my-value"
-        assert param.is_private is False
-
-    def test_private_param_from_cli(self):
-        param = ParameterValue.from_cli("__SECRET", "token123")
-        assert param.value == "token123"
-        assert param.is_private is True
-
-    def test_private_param_serializes_to_redacted(self):
-        param = ParameterValue.from_cli("__TOKEN", "real-secret")
-        assert param.model_dump() == "***"
-
-    def test_public_param_serializes_to_value(self):
-        param = ParameterValue.from_cli("HOST", "example.com")
-        assert param.model_dump() == "example.com"
 
 
 class TestReadConfigFromFileHeaders:

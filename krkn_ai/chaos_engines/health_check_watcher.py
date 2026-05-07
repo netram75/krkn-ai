@@ -12,7 +12,7 @@ from collections import defaultdict
 import threading
 import time
 import requests
-from typing import List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from krkn_ai.utils.logger import get_logger
@@ -28,7 +28,11 @@ logger = get_logger(__name__)
 
 
 class HealthCheckWatcher:
-    def __init__(self, config: HealthCheckConfig, params: Dict[str, ParameterValue] = None):
+    def __init__(
+        self,
+        config: HealthCheckConfig,
+        params: Optional[Dict[str, ParameterValue]] = None,
+    ):
         self.config = config
         self._params = {k: v.value for k, v in (params or {}).items()}
         self._stop_event = threading.Event()
@@ -58,12 +62,14 @@ class HealthCheckWatcher:
         thread_results: List[HealthCheckResult] = []
         self._thread_results[thread_id] = (health_check.url, thread_results)
 
+        resolved_headers = self._resolve_headers(health_check)
+
         # Simple polling loop, stops when stop() is called
         while not self._stop_event.is_set():
             try:
                 resp = requests.get(
                     health_check.url,
-                    headers=self._resolve_headers(health_check),
+                    headers=resolved_headers,
                     timeout=health_check.timeout,
                 )
                 status = resp.status_code
