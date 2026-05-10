@@ -29,17 +29,18 @@ class DashboardManager:
         try:
             if background:
                 log_file_path = os.path.join(actual_output, "dashboard.log")
-                log_file = open(log_file_path, "w")
+                log_file = open(log_file_path, "a")
 
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                )
-                
-                # Parent can safely close its file descriptor
-                log_file.close()
-                
+                try:
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                    )
+                finally:
+                    # Parent can safely close its file descriptor
+                    log_file.close()
+
                 # Check quickly if the process failed to start
                 try:
                     retcode = process.wait(timeout=2)
