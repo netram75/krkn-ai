@@ -89,6 +89,10 @@ class TestGeneticAlgorithmCoreMethods:
                             mock_summary_reporter.return_value = mock_reporter_instance
                             genetic_algorithm.best_of_generation = [Mock()]
                             genetic_algorithm.seen_population = {Mock(): Mock()}
+                            final_rate = 0.42
+                            genetic_algorithm.current_scenario_mutation_rate = (
+                                final_rate
+                            )
                             genetic_algorithm.save()
 
                             # Verify all reporter methods are called
@@ -97,4 +101,10 @@ class TestGeneticAlgorithmCoreMethods:
                             assert mock_save_report.called
                             assert mock_sort.called
                             assert mock_summary_reporter.called
+                            assert (
+                                mock_summary_reporter.call_args.kwargs[
+                                    "final_scenario_mutation_rate"
+                                ]
+                                == final_rate
+                            )
                             assert mock_reporter_instance.save.called
