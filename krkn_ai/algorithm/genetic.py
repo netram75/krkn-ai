@@ -63,9 +63,6 @@ class GeneticAlgorithm:
         self.krkn_client = KrknRunner(
             config, output_dir=self.output_dir, runner_type=runner_type
         )
-        self.active_cluster_components = (
-            self.config.cluster_components.get_active_components()
-        )
         self.population: List[BaseScenario] = []
 
         self.stagnant_generations = 0
@@ -587,7 +584,7 @@ class GeneticAlgorithm:
         for _, scenario_cls in self.valid_scenarios:
             # instantiate new scenario for a scenario type
             new_scenario = scenario_cls(
-                cluster_components=self.active_cluster_components
+                cluster_components=self.config.cluster_components.get_active_components()
             )
 
             common_params = set([type(x) for x in new_scenario.parameters]) & set(

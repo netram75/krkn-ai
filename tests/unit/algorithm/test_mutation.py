@@ -87,9 +87,6 @@ class TestMutation:
             ],
         )
         genetic_algorithm.config.cluster_components = cluster_components
-        genetic_algorithm.active_cluster_components = (
-            cluster_components.get_active_components()
-        )
         genetic_algorithm.valid_scenarios = [("recording_scenario", RecordingScenario)]
         RecordingScenario.received_components = []
 
