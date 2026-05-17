@@ -289,8 +289,8 @@ def _run_detectors(
     return m
 
 
-def _anom_bubble(df: pd.DataFrame) -> str:
-    fig = create_anomaly_overview_plot(df)
+def _anom_bubble(df: pd.DataFrame, mode: str = "z_score") -> str:
+    fig = create_anomaly_overview_plot(df, mode=mode)
     if fig is None:
         return _na("No anomalies detected.")
     return _fig_html(fig, 450)
@@ -374,7 +374,7 @@ def _failed_bar(df_failed: pd.DataFrame) -> str:
 
 
 # HTML Template
-_PLOTLY_CDN = '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>'
+_PLOTLY_CDN = '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>'
 
 
 def _get_css() -> str:
@@ -586,7 +586,7 @@ def generate_html_report(
             anom_cards
             + '<div class="two-col">'
             + "<div>"
-            + _anom_bubble(all_anomalies)
+            + _anom_bubble(all_anomalies, mode=anomaly_mode)
             + "</div>"
             + "<div>"
             + _anom_type_bar(all_anomalies)

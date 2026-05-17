@@ -19,6 +19,8 @@ duration:
 hc_failure:
   # Failure Score baseline multiplier. Only flag if health_check_failure_score > baseline * multiplier (Default: 1.1)
   baseline_multiplier: 1.1
+  # % deviation from baseline that triggers a Health Check Failure Surge in pct_deviation mode (Default: 30.0)
+  baseline_pct: 30.0
 
 fitness_regression:
   high_drop_pct: 20.0
@@ -29,6 +31,8 @@ hc_response_time:
   z_threshold: 1.5
   # Multiplier relative to baseline health-check response time triggering anomaly (Default: 1.2)
   baseline_multiplier: 1.2
+  # % deviation from baseline that triggers a Health Check Response Time anomaly in pct_deviation mode (Default: 30.0)
+  baseline_pct: 30.0
 
 service_response_time:
   z_threshold: 1.5

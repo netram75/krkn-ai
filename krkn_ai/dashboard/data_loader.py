@@ -8,6 +8,7 @@ import re
 import json
 
 
+@st.cache_data(ttl=300)
 def load_results_csv(output_dir: str):
     """Return (file_exists, df).  df is None when file is missing or empty or unreadable."""
     csv_path = os.path.join(output_dir, "reports", "all.csv")
@@ -21,6 +22,7 @@ def load_results_csv(output_dir: str):
         return True, None
 
 
+@st.cache_data(ttl=300)
 def load_config_yaml(output_dir: str):
     config_path = os.path.join(output_dir, "krkn-ai.yaml")
     if os.path.exists(config_path):
@@ -32,7 +34,7 @@ def load_config_yaml(output_dir: str):
     return None
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=300)
 def load_detailed_scenarios_data(output_dir: str):
     yaml_pattern = os.path.join(output_dir, "yaml", "generation_*", "scenario_*.yaml")
     yaml_files = glob.glob(yaml_pattern)
@@ -82,6 +84,7 @@ def load_detailed_scenarios_data(output_dir: str):
     return pd.DataFrame()
 
 
+@st.cache_data(ttl=300)
 def load_health_check_csv(output_dir: str):
     """Return (file_exists, df).  df is None when file is missing or empty or unreadable."""
     csv_path = os.path.join(output_dir, "reports", "health_check_report.csv")
@@ -95,6 +98,7 @@ def load_health_check_csv(output_dir: str):
         return True, None
 
 
+@st.cache_data(ttl=300)
 def load_logs(output_dir: str):
     """
     Parse all scenario_N.log files and return a list of structured dicts,

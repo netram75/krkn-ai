@@ -134,6 +134,17 @@ def main():
 
     # fully unfiltered copy (baseline row included) for anomaly detection
     df_results_all = df_results.copy() if df_results is not None else None
+    df_anom_src = df_results.copy() if df_results is not None else None
+    df_health_anom_src = df_health.copy() if df_health is not None else None
+    df_details_anom_src = df_details.copy() if df_details is not None else None
+
+    # ID normalisation helper
+    def _norm_id(v) -> str:
+        """Convert any scenario_id value to a canonical string (e.g. 3.0 -> '3')."""
+        try:
+            return str(int(float(v)))
+        except (ValueError, TypeError):
+            return str(v)
 
     # results_empty_file / health_empty_file - file exists but df is None (empty CSV)
     results_empty_file = results_file_found and df_results is None
@@ -275,17 +286,23 @@ def main():
             k_value = st.sidebar.number_input(
                 "Top K count:", min_value=1, value=3, step=1
             )
-            df_results = df_results.sort_values(by=sort_col, ascending=False).head(
+            mask_bl = df_results["scenario_id"].apply(_norm_id) == "baseline"
+            bl_df = df_results[mask_bl]
+            non_bl_df = df_results[~mask_bl]
+            top_df = non_bl_df.sort_values(by=sort_col, ascending=False).head(
                 int(k_value)
             )
+            df_results = pd.concat([bl_df, top_df], ignore_index=True)
         elif filter_type == "Top P(%) scenarios by above score":
             p_value = st.sidebar.slider(
                 "Top Percentage (%):", min_value=1, max_value=100, value=25
             )
-            cutoff = max(1, int(len(df_results) * (p_value / 100.0)))
-            df_results = df_results.sort_values(by=sort_col, ascending=False).head(
-                cutoff
-            )
+            mask_bl = df_results["scenario_id"].apply(_norm_id) == "baseline"
+            bl_df = df_results[mask_bl]
+            non_bl_df = df_results[~mask_bl]
+            cutoff = max(1, int(len(non_bl_df) * (p_value / 100.0)))
+            top_df = non_bl_df.sort_values(by=sort_col, ascending=False).head(cutoff)
+            df_results = pd.concat([bl_df, top_df], ignore_index=True)
 
     df_failed = None
     if df_results is not None and not df_results.empty:
@@ -312,16 +329,16 @@ def main():
         mask = pd.Series(True, index=df_results_all.index)
         if active_scenario_names:
             mask &= (df_results_all["scenario"].isin(active_scenario_names)) | (
-                df_results_all["scenario_id"].astype(str) == "baseline"
+                df_results_all["scenario_id"].apply(_norm_id) == "baseline"
             )
         if active_scenario_ids:
-            str_ids = [str(x) for x in active_scenario_ids]
-            mask &= (df_results_all["scenario_id"].astype(str).isin(str_ids)) | (
-                df_results_all["scenario_id"].astype(str) == "baseline"
+            str_ids = [_norm_id(x) for x in active_scenario_ids]
+            mask &= df_results_all["scenario_id"].apply(_norm_id).isin(str_ids) | (
+                df_results_all["scenario_id"].apply(_norm_id) == "baseline"
             )
         if active_generations and "generation_id" in df_results_all.columns:
             mask &= ((df_results_all["generation_id"] + 1).isin(active_generations)) | (
-                df_results_all["scenario_id"].astype(str) == "baseline"
+                df_results_all["scenario_id"].apply(_norm_id) == "baseline"
             )
         df_results_all = df_results_all[mask].copy()
 
@@ -329,8 +346,10 @@ def main():
         if active_scenario_names:
             df_results = df_results[df_results["scenario"].isin(active_scenario_names)]
         if active_scenario_ids:
-            str_ids = [str(x) for x in active_scenario_ids]
-            df_results = df_results[df_results["scenario_id"].astype(str).isin(str_ids)]
+            str_ids = [_norm_id(x) for x in active_scenario_ids]
+            df_results = df_results[
+                df_results["scenario_id"].apply(_norm_id).isin(str_ids)
+            ]
         if active_generations and "generation_id" in df_results.columns:
             df_results = df_results[
                 (df_results["generation_id"] + 1).isin(active_generations)
@@ -340,36 +359,45 @@ def main():
         if active_scenario_names:
             df_failed = df_failed[df_failed["scenario"].isin(active_scenario_names)]
         if active_scenario_ids:
-            str_ids = [str(x) for x in active_scenario_ids]
-            df_failed = df_failed[df_failed["scenario_id"].astype(str).isin(str_ids)]
+            str_ids = [_norm_id(x) for x in active_scenario_ids]
+            df_failed = df_failed[
+                df_failed["scenario_id"].apply(_norm_id).isin(str_ids)
+            ]
         if active_generations and "generation_id" in df_failed.columns:
             df_failed = df_failed[
                 (df_failed["generation_id"] + 1).isin(active_generations)
             ]
 
-    # Derive the filtered scenario IDs for cross-tab consistency (from successful runs only)
+    # Derive the filtered scenario IDs for cross-tab consistency — normalised to
     filtered_scenario_ids = (
-        df_results["scenario_id"].unique().tolist()
+        [_norm_id(x) for x in df_results["scenario_id"].unique()]
         if df_results is not None
         and not df_results.empty
         and "scenario_id" in df_results.columns
         else []
     )
 
-    # Filter flag
+    # Filter flag — true when any name/id/generation filters or top-K/top-P is active
     filters_active = bool(
-        global_scenarios_name or global_scenarios_id or global_generations
+        global_scenarios_name
+        or global_scenarios_id
+        or global_generations
+        or filter_type != "All"
     )
 
-    # Apply global scenario filter to health-check CSV
+    # Apply global scenario filter to health-check CSV (normalise IDs first)
     if df_health is not None and not df_health.empty and filters_active:
-        str_ids = [str(x) for x in filtered_scenario_ids]
-        df_health = df_health[df_health["scenario_id"].astype(str).isin(str_ids)]
+        df_health["_norm_id"] = df_health["scenario_id"].apply(_norm_id)
+        df_health = df_health[df_health["_norm_id"].isin(filtered_scenario_ids)].drop(
+            columns=["_norm_id"]
+        )
 
-    # Apply global scenario filter to detailed scenarios CSV (scenario_id stored as str there)
+    # Apply global scenario filter to detailed scenarios CSV
     if df_details is not None and not df_details.empty and filters_active:
-        str_ids = [str(x) for x in filtered_scenario_ids]
-        df_details = df_details[df_details["scenario_id"].astype(str).isin(str_ids)]
+        df_details["_norm_id"] = df_details["scenario_id"].apply(_norm_id)
+        df_details = df_details[
+            df_details["_norm_id"].isin(filtered_scenario_ids)
+        ].drop(columns=["_norm_id"])
 
     # HTML Report Export
     st.sidebar.divider()
@@ -395,10 +423,8 @@ def main():
                     df_health=report_df_health,
                     df_results_all=df_results_all,
                     df_details=df_details,
-                    df_failed=df_failed if "df_failed" in locals() else None,
-                    global_services=global_services
-                    if "global_services" in locals()
-                    else None,
+                    df_failed=df_failed,
+                    global_services=global_services,
                     filtered_scenario_ids=filtered_scenario_ids,
                     anomaly_mode=amode,
                 ).encode("utf-8")
@@ -503,9 +529,9 @@ def main():
         else:
             render_anomalies(
                 df_results=df_results,
-                df_health=df_health,
-                df_results_all=df_results_all,
-                df_details=df_details,
+                df_health=df_health_anom_src,
+                df_results_all=df_anom_src,
+                df_details=df_details_anom_src,
                 global_services=global_services if global_services else None,
                 filtered_scenario_ids=filtered_scenario_ids
                 if filtered_scenario_ids

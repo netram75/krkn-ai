@@ -31,10 +31,9 @@ hr.d{border:none;border-top:1px solid var(--b);margin:1rem 0}
 
 .scenario-dist-container {
     display: flex;
-    flex-wrap: wrap;
-    gap: 2%;
+    flex-direction: column;
+    gap: 1.5rem;
 }
 .scenario-dist-item {
-    flex: 1;
-    min-width: 48%;
+    width: 100%;
 }

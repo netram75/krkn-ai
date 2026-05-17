@@ -669,10 +669,29 @@ def _summary_metrics(all_anomalies: pd.DataFrame):
     c5.metric("Anomaly Types", types)
 
 
+def _make_scenario_label(scenario_id: str, scenario_name: str) -> str:
+    """Return a human-readable label like '1 (pod-disruption)' for a scenario."""
+    sid = str(scenario_id)
+    sname = str(scenario_name) if scenario_name and not pd.isna(scenario_name) else ""
+    if sname and sname not in ("?", sid, "nan"):
+        return f"{sid} ({sname})"
+    return sid
+
+
 def create_anomaly_overview_plot(all_anomalies: pd.DataFrame, mode: str = MODE_ZSCORE):
     if all_anomalies.empty:
         return None
     df = all_anomalies.copy()
+
+    # Build scenario label: "1 (pod-disruption)"
+    if "scenario" in df.columns:
+        df["scenario_label"] = df.apply(
+            lambda r: _make_scenario_label(r["scenario_id"], r.get("scenario", "")),
+            axis=1,
+        )
+    else:
+        df["scenario_label"] = df["scenario_id"].astype(str)
+
     if mode == MODE_PCT and "baseline_ref" in df.columns and "value" in df.columns:
         # Use |% deviation from baseline| as bubble size
         def _abs_pct(row):
@@ -686,18 +705,27 @@ def create_anomaly_overview_plot(all_anomalies: pd.DataFrame, mode: str = MODE_Z
         df["bubble_size"] = df.apply(_abs_pct, axis=1).clip(lower=0.5)
         size_col = "bubble_size"
         size_label = "|% Deviation from Baseline|"
-        title = "Anomaly Map — Scenario × Anomaly Type (bubble size = |% deviation from baseline|)"
-        hover_extra = ["detail", "z_score", "value", "threshold", "baseline_ref"]
+        title = "Anomaly Map — Anomaly Type × Scenario (bubble size = |% deviation from baseline|)"
+        hover_extra = [
+            "detail",
+            "z_score",
+            "value",
+            "threshold",
+            "baseline_ref",
+            "scenario_id",
+        ]
     else:
         df["bubble_size"] = df["z_score"].abs().clip(lower=0.1)
         size_col = "bubble_size"
         size_label = "|Z-Score|"
-        title = "Anomaly Map — Scenario × Anomaly Type (bubble size = |z-score|)"
-        hover_extra = ["detail", "z_score", "value", "threshold"]
+        title = "Anomaly Map — Anomaly Type × Scenario (bubble size = |z-score|)"
+        hover_extra = ["detail", "z_score", "value", "threshold", "scenario_id"]
+
+    # Scenarios on Y-axis, anomaly types on X-axis
     fig = px.scatter(
         df,
         x="anomaly_type",
-        y="scenario_id",
+        y="scenario_label",
         size=size_col,
         color="severity",
         color_discrete_map=SEVERITY_COLORS,
@@ -705,19 +733,20 @@ def create_anomaly_overview_plot(all_anomalies: pd.DataFrame, mode: str = MODE_Z
         title=title,
         labels={
             "anomaly_type": "Anomaly Type",
-            "scenario_id": "Scenario ID",
+            "scenario_label": "Scenario",
             size_col: size_label,
         },
         size_max=40,
         category_orders={"severity": SEVERITY_ORDER},
     )
     fig.update_layout(
-        height=420,
-        margin=dict(l=60, r=20, t=50, b=80),
+        height=max(500, 60 * df["scenario_label"].nunique() + 150),
+        margin=dict(l=160, r=20, t=60, b=80),
         xaxis_tickangle=-30,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         legend_title_text="Severity",
+        yaxis=dict(autorange="reversed"),
     )
     return fig
 
@@ -758,6 +787,17 @@ def create_fitness_with_anomalies_plot(
     working = df_results[df_results["scenario_id"].astype(str) != "baseline"].copy()
     if working.empty:
         return None
+
+    # Build scenario labels: "1 (pod-disruption)"
+    scen_col = "scenario" if "scenario" in working.columns else None
+    if scen_col:
+        working["_label"] = working.apply(
+            lambda r: _make_scenario_label(r["scenario_id"], r.get("scenario", "")),
+            axis=1,
+        )
+    else:
+        working["_label"] = working["scenario_id"].astype(str)
+
     fig = go.Figure()
     anomaly_ids = set()
     if not fitness_anomalies.empty:
@@ -766,18 +806,18 @@ def create_fitness_with_anomalies_plot(
     anom = working[working["scenario_id"].astype(str).isin(anomaly_ids)]
     fig.add_trace(
         go.Scatter(
-            x=normal["scenario_id"].astype(str),
+            x=normal["_label"],
             y=normal["fitness_score"],
             mode="markers",
             marker=dict(size=10, color="#64748b", symbol="circle"),
             name="Normal",
-            hovertemplate="Scenario %{x}<br>Fitness: %{y:.3f}<extra></extra>",
+            hovertemplate="%{x}<br>Fitness: %{y:.3f}<extra></extra>",
         )
     )
     if not anom.empty:
         fig.add_trace(
             go.Scatter(
-                x=anom["scenario_id"].astype(str),
+                x=anom["_label"],
                 y=anom["fitness_score"],
                 mode="markers",
                 marker=dict(
@@ -787,7 +827,7 @@ def create_fitness_with_anomalies_plot(
                     line=dict(width=2, color="#fff"),
                 ),
                 name="Fitness Anomaly",
-                hovertemplate="Scenario %{x}<br>Fitness: %{y:.3f}<extra></extra>",
+                hovertemplate="%{x}<br>Fitness: %{y:.3f}<extra></extra>",
             )
         )
     if len(working) >= 2:
@@ -813,13 +853,12 @@ def create_fitness_with_anomalies_plot(
         )
     fig.update_layout(
         title="Fitness Score per Scenario with Anomaly Markers",
-        xaxis_title="Scenario ID",
+        xaxis_title="Scenario",
         yaxis_title="Fitness Score",
         height=380,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
     )
-    fig.update_xaxes(tickmode="linear", dtick=1)
     return fig
 
 
@@ -889,18 +928,26 @@ def create_duration_z_scores_plot(df_results: pd.DataFrame, baseline: dict):
                 else "#64748b"
             )
 
+    # Build scenario labels
+    if "scenario" in working.columns:
+        working["_label"] = working.apply(
+            lambda r: _make_scenario_label(r["scenario_id"], r.get("scenario", "")),
+            axis=1,
+        )
+    else:
+        working["_label"] = working["scenario_id"].astype(str)
+
     working["color"] = working["z_duration"].apply(anomaly_color)
     fig = go.Figure(
         go.Bar(
-            x=working["scenario_id"].astype(str),
+            x=working["_label"],
             y=working["z_duration"],
             marker_color=working["color"],
             text=working["z_duration"].round(2),
             textposition="outside",
+            customdata=working[["duration_seconds"]],
             hovertemplate=(
-                "Scenario %{x}<br>Deviation from baseline: %{y:.3f}<br>Duration: "
-                + working["duration_seconds"].astype(str)
-                + "s<extra></extra>"
+                "%{x}<br>Deviation from baseline: %{y:.3f}<br>Duration: %{customdata[0]:.1f}s<extra></extra>"
             ),
         )
     )
@@ -916,13 +963,12 @@ def create_duration_z_scores_plot(df_results: pd.DataFrame, baseline: dict):
     )
     fig.update_layout(
         title=f"Execution Time (Duration) Deviation per Scenario — {title_suffix}",
-        xaxis_title="Scenario ID",
+        xaxis_title="Scenario",
         yaxis_title=y_label,
         height=350,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
     )
-    fig.update_xaxes(tickmode="linear", dtick=1)
     return fig
 
 
@@ -959,20 +1005,28 @@ def create_duration_pct_baseline_plot(df_results: pd.DataFrame, baseline: dict):
             return "#f97316"
         return "#64748b"
 
+    # Build scenario labels
+    if "scenario" in working.columns:
+        working["_label"] = working.apply(
+            lambda r: _make_scenario_label(r["scenario_id"], r.get("scenario", "")),
+            axis=1,
+        )
+    else:
+        working["_label"] = working["scenario_id"].astype(str)
+
     working["color"] = working["pct_deviation"].apply(_color)
 
     fig = go.Figure(
         go.Bar(
-            x=working["scenario_id"].astype(str),
+            x=working["_label"],
             y=working["pct_deviation"],
             marker_color=working["color"],
             text=working["pct_deviation"].round(1).astype(str) + "%",
             textposition="outside",
+            customdata=working[["duration_seconds"]],
             hovertemplate=(
-                "Scenario %{x}<br>% Change from Baseline: %{y:.1f}%<br>Duration: "
-                + working["duration_seconds"].astype(str)
-                + "s"
-                + f"<br>Baseline: {baseline_d:.1f}s<extra></extra>"
+                f"%{{x}}<br>% Change from Baseline: %{{y:.1f}}%<br>Duration: %{{customdata[0]:.1f}}s"
+                f"<br>Baseline: {baseline_d:.1f}s<extra></extra>"
             ),
         )
     )
@@ -1008,13 +1062,12 @@ def create_duration_pct_baseline_plot(df_results: pd.DataFrame, baseline: dict):
     )
     fig.update_layout(
         title="Execution Time — % Deviation from Baseline per Scenario",
-        xaxis_title="Scenario ID",
+        xaxis_title="Scenario",
         yaxis_title="% Change from Baseline",
         height=350,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
     )
-    fig.update_xaxes(tickmode="linear", dtick=1)
     return fig
 
 
@@ -1074,8 +1127,8 @@ def create_service_response_time_zscore_heatmap_plot(df_details: pd.DataFrame):
         labels=dict(x="Scenario ID", y="Service", color="Z-Score"),
         title="Service Response Time — Z-Score vs Service Distribution (Scenario × Service)",
         aspect="auto",
-        text_auto=".2f",
     )
+    fig.update_traces(xgap=1, ygap=1)
     fig.update_layout(
         height=max(300, 60 * len(pivot) + 100),
         paper_bgcolor="rgba(0,0,0,0)",
@@ -1120,7 +1173,6 @@ def create_service_response_time_heatmap_plot(df_details: pd.DataFrame):
             [0.7, "#f97316"],
             [1, "#ef4444"],
         ]
-        fmt = ".1f"
         zmid = None
     else:
         # % change = (scenario_rt - baseline_rt) / baseline_rt * 100
@@ -1143,7 +1195,6 @@ def create_service_response_time_heatmap_plot(df_details: pd.DataFrame):
         color_label = "% Change from Baseline"
         title = "Service Response Time — % Change from Baseline (Scenario × Service)"
         color_scale = [[0.0, "#22c55e"], [0.5, "#f8fafc"], [1.0, "#ef4444"]]
-        fmt = "+.1f"
         zmid = 0
 
     # Sort columns: numeric IDs ascending
@@ -1163,8 +1214,8 @@ def create_service_response_time_heatmap_plot(df_details: pd.DataFrame):
         labels=dict(x="Scenario ID", y="Service", color=color_label),
         title=title,
         aspect="auto",
-        text_auto=fmt,
     )
+    fig.update_traces(xgap=1, ygap=1)
     fig.update_layout(
         height=max(300, 60 * len(pivot) + 100),
         paper_bgcolor="rgba(0,0,0,0)",
@@ -1179,8 +1230,7 @@ def _anomaly_detail_table(all_anomalies: pd.DataFrame):
         st.info("No anomalies detected.")
         return
     df = all_anomalies.copy()
-    sev_emoji = {"High": "", "Medium": "", "Low": ""}
-    df["severity_display"] = df["severity"].map(sev_emoji) + " " + df["severity"]
+    df["severity_display"] = df["severity"]
     display_cols = [
         "severity_display",
         "anomaly_type",
@@ -1269,42 +1319,83 @@ def render_anomalies(
     )
     mode = MODE_ZSCORE if "Z-Score" in mode_label else MODE_PCT
 
+    # Legend & Detection Methods
     if mode == MODE_ZSCORE:
         legend_md = """
-| Anomaly Type | Algorithm | Description |
-|---|---|---|
-| **Low / High Fitness** | IQR (k=1.5) | Scenarios outside Q1−1.5·IQR or Q3+1.5·IQR fences. |
-| **Duration Anomaly** | Z-score σ≥1.5 | Execution time > 1.5 std devs from the mean. |
-| **Health Check Failure Surge** | IQR | Health Check failure score above IQR upper fence. |
-| **Fitness Regression** | Gen-over-gen delta | Best fitness lower than previous generation's best. |
-| **Service Failure Rate Spike** | Z-score σ≥1.5 | Per-service failure rate >1.5σ vs service distribution. |
-| **Krkn Failure Score Spike** | Non-zero + IQR | krkn_failure_score > 0 (engine error or misconfig). |
-| **Health Check Response Time** | IQR + Z-score σ≥1.5| Health Check response-time score above IQR fence or >1.5σ. |
-| **Service Response Time Spike**| Z-score σ≥1.5 | Per-service mean RT >1.5σ vs service distribution. |
+### Z-Score Detection — How It Works
 
-**Severity:** High — |z|≥2.5 | Medium — |z|≥1.5 | Low — rule-based threshold exceeded
+For each metric **x** across *N* non-baseline runs:
+
+| Symbol | Formula |
+|:---|:---|
+| Population mean | `μ  = (x₁ + x₂ + … + xₙ) / N` |
+| Population std dev | `σ  = √[ Σ(xᵢ − μ)² / N ]` |
+| Z-score | `z  = (x − μ) / σ` |
+
+> **Severity bands:** `|z| ≥ 2.5` →  High &nbsp;|&nbsp; `|z| ≥ 1.5` → Medium &nbsp;|&nbsp; else → Low
+
+#### IQR Fences (used for Fitness & HC Failure Surge)
+
+```
+Q1, Q3 = 25th / 75th percentile of the metric across runs
+IQR    = Q3 − Q1
+Lower fence = Q1 − 1.5 × IQR
+Upper fence = Q3 + 1.5 × IQR
+→ Flagged when x < Lower fence  OR  x > Upper fence
+```
+
+#### Per-Detector Formulas
+
+| Detector | Metric | Method | Trigger |
+|---|---|---|---|
+| **Low / High Fitness** | `fitness_score` | IQR fence | x < Q1−1.5·IQR or x > Q3+1.5·IQR |
+| **Duration Anomaly** | `duration_seconds` | Z-score (RMS σ vs baseline if available) | `\|z\| ≥ 1.5` |
+| **HC Failure Surge** | `health_check_failure_score` | IQR fence | x > Q3+1.5·IQR |
+| **Fitness Regression** | Best fitness per generation | Gen-over-gen delta | `drop% = (prev−cur)/prev×100`; High if drop > 20% |
+| **Service Failure Rate** | Per-service failure_rate | Z-score vs service distribution | `\|z\| ≥ 1.5` |
+| **Krkn Failure Score** | `krkn_failure_score` | Non-zero sentinel + IQR | Non-zero → Medium; above IQR upper fence → High |
+| **HC Response Time** | `health_check_response_time_score` | IQR + Z-score | IQR breach OR `\|z\| ≥ 1.5` |
+| **Service RT Spike** | Avg `response_time` per service | Z-score vs per-service distribution | `\|z\| ≥ 1.5` |
+
+*Duration uses RMS deviation: `σ_rms = √[ Σ(dᵢ − baseline)² / N ]` when a baseline is available; falls back to population σ otherwise.*
 """
     else:
         legend_md = """
-| Anomaly Type | Algorithm | Description |
-|---|---|---|
-| **Low / High Fitness** | IQR + Baseline % | Fails IQR fences or deviates significantly below baseline fitness. |
-| **Duration Anomaly** | % Deviation | Execution time deviates from baseline by ≥ 30%. |
-| **Health Check Failure Surge** | % Deviation | Health check failure score deviates from baseline by ≥ 30%. |
-| **Fitness Regression** | Gen-over-gen delta | Best fitness lower than previous generation's best. |
-| **Service Failure Rate Spike** | % Deviation | Per-service failure rate deviates from baseline by ≥ 30%. |
-| **Krkn Failure Score Spike** | Non-zero + IQR | krkn_failure_score > 0 (engine error or misconfig). |
-| **Health Check Response Time** | % Deviation | Health Check RT deviates from baseline by ≥ 30%. |
-| **Service Response Time Spike**| % Deviation | Per-service mean RT deviates from baseline by ≥ 30%. |
+### % Deviation from Baseline — How It Works
 
-**Severity:** High — |Δ|≥60% | Medium — |Δ|≥30% | Low — rule-based threshold exceeded
+For each value **x** and its baseline reference **b**:
+
+| Symbol | Formula |
+|:---|:---|
+| Percent deviation | `Δ% = (x − b) / \|b\| × 100` |
+
+> **Severity bands:** `\|Δ%\| ≥ 60` → High &nbsp;|&nbsp; `\|Δ%\| ≥ 30` → Medium &nbsp;|&nbsp; else → Low
+
+> **Note:** IQR fences (Q1−1.5·IQR / Q3+1.5·IQR) are still applied for Fitness as an additional gate.
+
+#### Per-Detector Formulas
+
+| Detector | Baseline reference *b* | Trigger condition |
+|---|---|---|
+| **Low / High Fitness** | Baseline scenario `fitness_score` | IQR fence breach **and/or** `Δ% < 0` below baseline |
+| **Duration Anomaly** | Baseline scenario `duration_seconds` | `\|Δ%\| ≥ 30` |
+| **HC Failure Surge** | Baseline `health_check_failure_score` | `\|Δ%\| ≥ 30` |
+| **Fitness Regression** | Previous generation best fitness | `drop% = (prev−cur)/prev×100`; High if drop > 20%, Medium if drop > 10% |
+| **Service Failure Rate** | Baseline per-service failure rate | `\|Δ%\| ≥ 30` |
+| **Krkn Failure Score** | — (non-zero sentinel) | Non-zero → Medium; above IQR upper fence → High |
+| **HC Response Time** | Baseline `health_check_response_time_score` | `\|Δ%\| ≥ 30` |
+| **Service RT Spike** | Baseline per-service avg `response_time` | `\|Δ%\| ≥ 30` |
+
+*Fitness Regression and Krkn Failure Score do not use % deviation — they use fixed rule-based logic regardless of mode.*
 """
 
     with st.expander("Anomaly Type Legend & Detection Methods", expanded=False):
         st.markdown(legend_md)
 
     # Prefer unfiltered dataset so baseline row is always present
-    src = df_results_all if df_results_all is not None else df_results
+    src: pd.DataFrame = pd.DataFrame(
+        df_results_all if df_results_all is not None else df_results
+    )
 
     if src is None or src.empty:
         st.warning("No scenario results available for anomaly analysis.")
@@ -1367,6 +1458,22 @@ def render_anomalies(
             all_anomalies["generation"] = pd.to_numeric(
                 all_anomalies["generation"], errors="coerce"
             ).astype("Int64")
+
+    # Post-filter: keep only anomalies for the selected scenarios.
+    # Detection ran on the FULL population (needed for valid stats), so we filter
+    # the results here rather than restricting the input data.
+    if not all_anomalies.empty and filtered_scenario_ids:
+
+        def _norm(v) -> str:
+            try:
+                return str(int(float(v)))
+            except (ValueError, TypeError):
+                return str(v)
+
+        normed_filter = set(filtered_scenario_ids)  # already normalised by app.py
+        all_anomalies = all_anomalies[
+            all_anomalies["scenario_id"].apply(_norm).isin(normed_filter)
+        ]
 
     st.divider()
 
