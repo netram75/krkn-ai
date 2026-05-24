@@ -37,7 +37,7 @@ class HealthCheckWatcher:
         self._params = {k: v.value for k, v in (params or {}).items()}
         self._stop_event = threading.Event()
         self._threads: List[threading.Thread] = []
-        # Each thread stores results in its own list - ZERO contention!
+        self._results_lock = threading.Lock()
         self._thread_results: Dict[int, Tuple[str, List[HealthCheckResult]]] = {}
 
     def run(self):
@@ -65,7 +65,8 @@ class HealthCheckWatcher:
         if thread_id is None:
             return  # Skip if thread ID is None (should not happen in normal operation)
         thread_results: List[HealthCheckResult] = []
-        self._thread_results[thread_id] = (health_check.url, thread_results)
+        with self._results_lock:
+            self._thread_results[thread_id] = (health_check.url, thread_results)
 
         resolved_headers = self._resolve_headers(health_check)
 
@@ -94,8 +95,8 @@ class HealthCheckWatcher:
                 response_time=resp.elapsed.total_seconds() if resp is not None else -1,
             )
 
-            # Store in thread-private list - NO LOCKS, NO CONTENTION!
-            thread_results.append(result)
+            with self._results_lock:
+                thread_results.append(result)
 
             if not success and self.config.stop_watcher_on_failure:
                 self._stop_event.set()
@@ -120,11 +121,16 @@ class HealthCheckWatcher:
                 )
 
     def get_results(self) -> Dict[str, List[HealthCheckResult]]:
-        """Aggregate results from all threads - called after threads complete"""
+        """Aggregate a stable snapshot of collected health check results."""
         results = defaultdict(list)
 
-        # Each thread has its own URL and results list
-        for url, thread_results in self._thread_results.values():
+        with self._results_lock:
+            snapshots = [
+                (url, list(thread_results))
+                for url, thread_results in self._thread_results.values()
+            ]
+
+        for url, thread_results in snapshots:
             results[url].extend(thread_results)
 
         return dict(results)

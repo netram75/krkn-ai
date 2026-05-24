@@ -145,6 +145,35 @@ class TestHealthCheckWatcherResults:
             assert result.success is True
             assert result.status_code == 200
 
+    def test_get_results_returns_snapshot_copy(self):
+        """Test get_results does not expose live worker result lists"""
+        watcher = HealthCheckWatcher(HealthCheckConfig(applications=[]))
+        first_result = HealthCheckResult(
+            name="test-app",
+            status_code=200,
+            success=True,
+            response_time=0.1,
+        )
+        late_result = HealthCheckResult(
+            name="test-app",
+            status_code=200,
+            success=True,
+            response_time=0.2,
+        )
+
+        with watcher._results_lock:
+            watcher._thread_results[1] = (
+                "http://localhost:8080/health",
+                [first_result],
+            )
+
+        results = watcher.get_results()
+
+        with watcher._results_lock:
+            watcher._thread_results[1][1].append(late_result)
+
+        assert results["http://localhost:8080/health"] == [first_result]
+
     @patch("krkn_ai.chaos_engines.health_check_watcher.requests.get")
     def test_summarize_success_rate_calculates_failure_score(self, mock_get):
         """Test summarize_success_rate calculates failure score correctly"""
